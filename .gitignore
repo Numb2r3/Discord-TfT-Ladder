@@ -179,9 +179,9 @@ __pycache__/
 *.pyo
 *.pyd
 
-# Log files (we don't want generated logs in Git)
-*.log
+# --- Log files and directories ---
 logs/
+*.log
 
 # Environment directories (Conda/Venv)
 logging_env/
