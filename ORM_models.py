@@ -86,17 +86,14 @@ class PlayerDiscordAccountLink(Base):
     # discord_account_id (Foreign Key): Verweist auf DiscordAccounts.discord_account_id
     discord_account_id = Column(String(36), ForeignKey('discord_accounts.discord_account_id'), nullable=False)
 
-    # Zusätzlicher UNIQUE-Constraint, um doppelte Verknüpfungen zu verhindern
-    # Ein Paar aus player_id und discord_account_id darf nur einmal vorkommen.
-    __table_args__ = (
-        UniqueConstraint('player_id', 'discord_account_id', name='_player_discord_uc'),
-    )
-
     # is_primary_account (Optional): Flag, ob dies der primäre Discord-Account für diesen Spieler ist
     is_primary_account = Column(Boolean, default=False, nullable=False)
 
     # linked_at: Zeitpunkt der Verknüpfung
     linked_at = Column(DateTime, default=func.now(), nullable=False)
+
+    is_active = Column(Boolean, default=True, nullable=False)
+    unlinked_at = Column(DateTime, nullable=True)
 
     # Relationships:
     # Direkte Beziehung zu den verknüpften Modellen
@@ -104,7 +101,8 @@ class PlayerDiscordAccountLink(Base):
     discord_account = relationship("DiscordAccount", backref="player_links")
 
     def __repr__(self):
-        return f"<PlayerDiscordAccountLink(player_id='{self.player_id}', discord_account_id='{self.discord_account_id}', is_primary={self.is_primary_account})>"
+        return (f"<PlayerDiscordAccountLink(player_id='{self.player_id}', "
+                f"discord_account_id='{self.discord_account_id}', is_active={self.is_active})>")
     
 
 class RiotAccount(Base):
@@ -196,17 +194,14 @@ class PlayerRiotAccountLink(Base):
     # riot_account_id (Foreign Key): Verweist auf RiotAccounts.riot_account_id
     riot_account_id = Column(String(36), ForeignKey('riot_accounts.riot_account_id'), nullable=False)
 
-    # Zusätzlicher UNIQUE-Constraint, um doppelte Verknüpfungen zu verhindern
-    # Ein Paar aus player_id und riot_account_id darf nur einmal vorkommen.
-    __table_args__ = (
-        UniqueConstraint('player_id', 'riot_account_id', name='_player_riot_uc'),
-    )
-
     # is_primary_riot_account (Optional): Flag, ob dies der primäre Riot-Account für diesen Spieler ist
     is_primary_riot_account = Column(Boolean, default=False, nullable=False)
 
     # linked_at: Zeitpunkt der Verknüpfung
     linked_at = Column(DateTime, default=func.now(), nullable=False)
+
+    is_active = Column(Boolean, default=True, nullable=False)
+    unlinked_at = Column(DateTime, nullable=True)
 
     # Relationships:
     # Direkte Beziehung zu den verknüpften Modellen
@@ -216,7 +211,8 @@ class PlayerRiotAccountLink(Base):
     def __repr__(self):
         return (f"<PlayerRiotAccountLink(player_id='{self.player_id}', "
                 f"riot_account_id='{self.riot_account_id}', "
-                f"is_primary_riot_account={self.is_primary_riot_account})>")
+                f"is_primary_riot_account={self.is_primary_riot_account})>', "
+                f"is_active={self.is_active})>")
     
 
 class DiscordServer(Base):
