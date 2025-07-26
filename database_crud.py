@@ -2,6 +2,7 @@ import uuid
 from contextlib import contextmanager
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.sql import func
 import logging
 from datetime import datetime
 
@@ -32,7 +33,7 @@ except Exception as e:
 
 
 engine = get_engine_alchemy()
-Session = sessionmaker(bind=engine)
+Session = sessionmaker(bind=engine, expire_on_commit=False)
 
 @contextmanager
 def session_scope():
