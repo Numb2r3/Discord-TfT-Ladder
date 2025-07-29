@@ -387,3 +387,25 @@ class RaceParticipant(Base):
         return (f"<RaceParticipant(participant_id='{self.participant_id}', "
                 f"race_id='{self.race_id}', server_player_id='{self.server_player_id}', "
                 f"final_rank={self.final_rank}, disqualified={self.is_disqualified})>")
+    
+class RiotAccountLPHistory(Base):
+    """Tracks the ranked history (LP, Tier, etc.) of a Riot Account over time."""
+    __tablename__ = 'riot_account_lp_history'
+
+    lp_history_id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    riot_account_id = Column(String(36), ForeignKey('riot_accounts.riot_account_id'), nullable=False, index=True)
+
+    league_points = Column(Integer, nullable=False)
+    queue_type = Column(String(50), nullable=True) # z.B. 'RANKED_TFT', 'RANKED_TFT_TURBO'
+    tier = Column(String(50), nullable=True)  # z.B. 'DIAMOND', 'MASTER'
+    division = Column(String(10), nullable=True)   # z.B. 'I', 'II', 'III', 'IV'
+    wins = Column(Integer, nullable=False)
+    losses = Column(Integer, nullable=False)
+
+    retrieved_at = Column(DateTime, default=func.now(), nullable=False)
+
+    riot_account = relationship("RiotAccount", backref="lp_history")
+
+    def __repr__(self):
+        return (f"<RiotAccountLPHistory(riot_account_id='{self.riot_account_id}', "
+                f"tier='{self.tier}', division='{self.division}', lp={self.league_points})>")

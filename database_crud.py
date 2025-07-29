@@ -1,21 +1,20 @@
 import uuid
 from contextlib import contextmanager
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import joinedload
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.sql import func
 import logging
 from datetime import datetime
+from sql_functions import get_engine_and_session_factory
 
 
 # --- Local Imports ---
 from ORM_models import (
     Base, Player, PlayerDisplayNameHistory, DiscordAccount,
-    PlayerDiscordAccountLink, RiotAccount, RiotAccountNameHistory,
+    PlayerDiscordAccountLink, RiotAccount, RiotAccountNameHistory,RiotAccountLPHistory,
 
     PlayerRiotAccountLink, DiscordServer, ServerPlayer, Race, RaceParticipant
 )
-from sql_functions import get_engine_alchemy
-
 # --- Initial Setup ---
 USER_PY_LOGGING_PREFIX = "CRUD_"
 
@@ -32,8 +31,7 @@ except Exception as e:
     logger = logging.getLogger(f'{USER_PY_LOGGING_PREFIX}SetupErrorFallback') # Optional: Make fallback name more specific
 
 
-engine = get_engine_alchemy()
-Session = sessionmaker(bind=engine, expire_on_commit=False)
+engine, Session = get_engine_and_session_factory()
 
 @contextmanager
 def session_scope():
@@ -155,7 +153,9 @@ def add_or_update_riot_account(puuid: str, game_name: str, tag_line: str, region
     try:
         with session_scope() as session:
             # Check if the account already exists
-            account = session.query(RiotAccount).filter_by(puuid=puuid).first()
+            account = session.query(RiotAccount).options(
+                        joinedload(RiotAccount.player_links).joinedload(PlayerRiotAccountLink.player)
+                        ).filter_by(puuid=puuid).first()
 
             if not account:
                 # --- Create New Account ---
@@ -617,5 +617,47 @@ def add_participant_to_race(race_id: str, server_player_id: str, **kwargs) -> Ra
                                'entity_id': new_participant.participant_id, **action_details})
             return new_participant
 
+    except SQLAlchemyError:
+        return None
+    
+def add_lp_history_entry(riot_account_id: str, queue_type: str, league_points: int, tier: str, division: str, wins: int, losses: int) -> RiotAccountLPHistory | None:
+    """
+    Adds a new League Points history entry for a specific Riot account.
+
+    Args:
+        riot_account_id: The UUID of the Riot account this entry belongs to.
+        queue_type: The type of queue (e.g., 'RANKED_TFT').
+        league_points: The player's current LP.
+        tier: The player's current tier (e.g., 'DIAMOND').
+        division: The player's current division (e.g., 'I').
+        wins: The player's total wins in that queue.
+        losses: The player's total losses in that queue.
+
+    Returns:
+        The newly created RiotAccountLPHistory object, or None on error.
+    """
+    action_details = {
+        'riot_account_id': riot_account_id,
+        'queue_type': queue_type,
+        'lp': league_points
+    }
+    logger.info(f"Attempting to add LP history entry for Riot account '{riot_account_id}'.",
+                extra={'action': 'ADD_LP_HISTORY_ATTEMPT', **action_details})
+
+    try:
+        with session_scope() as session:
+            new_entry = RiotAccountLPHistory(
+                riot_account_id=riot_account_id,
+                queue_type=queue_type,
+                league_points=league_points,
+                tier=tier,
+                division=division,
+                wins=wins,
+                losses=losses
+            )
+            session.add(new_entry)
+            logger.info("Successfully added new LP history entry.",
+                        extra={'action': 'ADD_LP_HISTORY_SUCCESS', **action_details})
+            return new_entry
     except SQLAlchemyError:
         return None
