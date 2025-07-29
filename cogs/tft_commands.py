@@ -46,29 +46,30 @@ class TFTCommands(commands.Cog):
             ephemeral=True # Nur der Befehlsausführende sieht diese Nachricht
         )
 
+        server_id = str(interaction.guild.id)
+
         # Die Orchestrierungsfunktion aus data_manager aufrufen
-        player_riot_account_tuple = await data_manager.register_new_player_with_riot_id(
+        result = await data_manager.handle_riot_account_registration(
+            server_id=server_id,
             game_name=game_name,
             tag_line=tag_line,
             region=region
         )
 
-        if player_riot_account_tuple:
-            player, riot_account = player_riot_account_tuple
-            success_message = (
-                f"Dein Riot Account **{riot_account.game_name}#{riot_account.tag_line}** "
-                f"wurde erfolgreich als Spieler **'{player.display_name}'** registriert und verknüpft!"
-            )
-            logger.info(f"Registrierung erfolgreich für Spieler '{player.display_name}' ({player.player_id}).")
-            await interaction.followup.send(success_message, ephemeral=True) # followup, da bereits geantwortet wurde
+        if not result:
+            message = f"Fehler bei der Registrierung von **{game_name}#{tag_line}**. Überprüfe die Eingabe oder versuche es später erneut."
         else:
-            error_message = (
-                f"Fehler bei der Registrierung von **{game_name}#{tag_line}**."
-                "Bitte überprüfe den Namen, die Tag Line und die Region. "
-                "Es könnte auch ein Problem mit der Riot API vorliegen oder der Account ist bereits verknüpft."
-            )
-            logger.error(f"Registrierung fehlgeschlagen für '{game_name}#{tag_line}'.")
-            await interaction.followup.send(error_message, ephemeral=True)
+            riot_account, status = result
+            account_name = f"**{riot_account.game_name}#{riot_account.tag_line}**"
+            
+            if status == 'ADDED':
+                message = f"✅ Erfolg! Der Account {account_name} wird jetzt auf diesem Server getrackt."
+            elif status == 'ALREADY_EXISTS':
+                message = f"ℹ️ Der Account {account_name} wird bereits auf diesem Server getrackt."
+            else: # Sollte nicht passieren, aber als Fallback
+                message = "Ein unerwarteter Fehler ist aufgetreten."
+
+        await interaction.followup.send(message, ephemeral=True)
 
 
 # Diese Async-Setup-Funktion ist erforderlich, damit der Cog vom Bot geladen werden kann

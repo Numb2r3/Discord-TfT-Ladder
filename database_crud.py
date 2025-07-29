@@ -681,3 +681,60 @@ def add_lp_history_entry(riot_account_id: str, queue_type: str, league_points: i
             return new_entry
     except SQLAlchemyError:
         return None
+    
+def activate_server(server_id: str) -> str | None:
+    """
+    Aktiviert einen Server in der Datenbank, indem is_active auf True gesetzt wird.
+    """
+    logger.info(f"Attempting to activate server '{server_id}'.", 
+                extra={'action': 'ACTIVATE_SERVER_ATTEMPT', 'server_id': server_id})
+    try:
+        with session_scope() as session:
+            server = session.query(DiscordServer).filter_by(server_id=server_id).first()
+            if not server:
+                logger.warning(f"Server '{server_id}' not found for activation.", 
+                               extra={'action': 'ACTIVATE_SERVER_NOT_FOUND', 'server_id': server_id})
+                return 'NOT_FOUND'
+            
+            if server.is_active:
+                logger.info(f"Server '{server_id}' is already active.",
+                            extra={'action': 'ACTIVATE_SERVER_NO_CHANGE', 'server_id': server_id})
+                return 'ALREADY_ACTIVE'
+
+            server.is_active = True
+            logger.info(f"Successfully activated server '{server_id}'.", 
+                        extra={'action': 'ACTIVATE_SERVER_SUCCESS', 'server_id': server_id})
+            return 'ACTIVATED'
+    except SQLAlchemyError:
+        return None
+    
+def add_account_to_server(server_id: str, riot_account_id: str) -> str | None:
+    """
+    Fügt einen Riot-Account zur Tracking-Liste eines Servers hinzu (erstellt einen ServerPlayer-Eintrag).
+    Gibt einen Status zurück: 'ADDED', 'ALREADY_EXISTS', None bei Fehler.
+    """
+    action_details = {'server_id': server_id, 'riot_account_id': riot_account_id}
+    logger.info("Attempting to add riot_account to server.", extra=action_details)
+    
+    try:
+        with session_scope() as session:
+            # Prüfen, ob die Verknüpfung bereits existiert
+            existing_link = session.query(ServerPlayer).filter_by(
+                server_id=server_id,
+                riot_account_id=riot_account_id
+            ).first()
+
+            if existing_link:
+                logger.info("Riot account is already tracked on this server.", extra=action_details)
+                return 'ALREADY_EXISTS'
+
+            # Neue Verknüpfung erstellen
+            new_link = ServerPlayer(
+                server_id=server_id,
+                riot_account_id=riot_account_id
+            )
+            session.add(new_link)
+            logger.info("Successfully added riot_account to server tracking.", extra=action_details)
+            return 'ADDED'
+    except SQLAlchemyError:
+        return None

@@ -4,8 +4,12 @@ import logging
 from dotenv import load_dotenv
 import time
 from collections import deque # KORREKTUR: Fehlender Import hinzugefügt
-from threading import Lock
+import asyncio
+from asyncio import Lock
+import sys
 import constants
+
+
 load_dotenv()
 
 # --- Konfiguration ---
@@ -53,10 +57,10 @@ RIOT_API_LIMITS_STR = os.getenv("RIOT_API_LIMITS")
 RATE_LIMITS = parse_rate_limits(RIOT_API_LIMITS_STR)
 
     
-# --- Intelligente, Thread-sichere Rate Limiter Klasse ---
+# --- Intelligente, SYNCHRONE Rate Limiter Klasse ---
 class RateLimiter:
     """
-    Eine Klasse zur proaktiven und Thread-sicheren Verwaltung von API-Rate-Limits.
+    Eine Klasse zur proaktiven und asynchronen Verwaltung von API-Rate-Limits.
     Sie berücksichtigt mehrere Zeitfenster gleichzeitig.
     """
     def __init__(self, limits):
@@ -70,11 +74,11 @@ class RateLimiter:
         self.history = [deque() for _ in self.limits]
         self.lock = Lock()
 
-    def acquire(self):
+    async def acquire(self):
         """
-        Blockiert, bis eine Anfrage sicher gesendet werden kann, und reserviert dann den Slot.
+        Wartet (asynchron), bis eine Anfrage sicher gesendet werden kann, und reserviert dann den Slot.
         """
-        with self.lock:
+        async with self.lock:
             while True:
                 now = time.time()
                 wait_duration = 0
@@ -90,7 +94,7 @@ class RateLimiter:
                 
                 if wait_duration > 0:
                     logger.debug(f"Rate limit active. Waiting for {wait_duration:.2f}s.")
-                    time.sleep(wait_duration + 0.01)
+                    await asyncio.sleep(wait_duration + 0.01)
                     continue
                 else:
                     for i in range(len(self.limits)):
@@ -100,16 +104,12 @@ class RateLimiter:
 # Erstelle eine Instanz des RateLimiters mit den (aus der .env) geladenen Limits
 riot_rate_limiter = RateLimiter(RATE_LIMITS)
 
-def _get_latest_api_key() -> str |None:
+def _get_latest_api_key_sync() -> str | None:
+    """Diese synchrone Version ist für den Executor gedacht."""
     try:
         response = requests.get(GIST_RAW_URL, timeout=10)
-        
-        if response.status_code == 200:
-            return response.text.strip()
-        else:
-            logger.error(f"Could not fetch API key from Gist. Status code: {response.status_code}")
-            return None
-            
+        response.raise_for_status()
+        return response.text.strip()
     except requests.RequestException as e:
         logger.error(f"Network error while fetching API key from Gist: {e}")
         return None
@@ -129,9 +129,14 @@ def _get_routing_value(region:str) -> str |None:
     logger.error(f"Could not find a routing value for region: {region}")
     return None
 
-def _make_api_request(url: str) -> dict | list | None:
-    """Führt eine Anfrage an die Riot-API aus, fügt den API-Schlüssel hinzu und behandelt Fehler."""
-    api_key = _get_latest_api_key()
+async def _make_api_request(url: str) -> dict | list | None:
+    """Führt eine Anfrage an die Riot-API aus, wartet auf das Rate-Limit und nutzt einen Executor."""
+
+    await riot_rate_limiter.acquire()
+    loop = asyncio.get_running_loop()
+
+    api_key = await loop.run_in_executor(None, _get_latest_api_key_sync)
+
     if not api_key:
         logger.critical("Cannot make API request without an API key.")
         return None
@@ -139,19 +144,27 @@ def _make_api_request(url: str) -> dict | list | None:
     headers = {"X-Riot-Token": api_key}
     
     try:
-        response = requests.get(url, headers=headers, timeout=10)
+        response = await loop.run_in_executor(
+            None, 
+            lambda: requests.get(url, headers=headers, timeout=10)
+        )
+
         if response.status_code == 429:
-            logger.warning("Rate limit exceeded. Waiting for a moment...")
+            logger.warning("Rate limit exceeded despite proactive limiter. Waiting for a moment...")
             return None
+        
         response.raise_for_status()
         return response.json()
+    
     except requests.exceptions.HTTPError as http_err:
         logger.error(f"HTTP Error for URL {url}: {http_err}")
     except requests.exceptions.RequestException as req_err:
         logger.error(f"Request Exception for URL {url}: {req_err}")
     return None
 
-def get_account_by_riot_id(game_name: str, tag_line: str, region: str) -> dict | None:
+# --- Öffentliche API-Funktionen ---
+
+async def get_account_by_riot_id(game_name: str, tag_line: str, region: str) -> dict | None:
     """Fragt die Riot API nach einem Account anhand der Riot ID und der Region ab."""
     logger.info(f"Querying Riot account for {game_name}#{tag_line} in region {region}")
     routing_value = _get_routing_value(region)
@@ -159,18 +172,18 @@ def get_account_by_riot_id(game_name: str, tag_line: str, region: str) -> dict |
         return None
     
     url = f"https://{routing_value}.api.riotgames.com/riot/account/v1/accounts/by-riot-id/{game_name}/{tag_line}"
-    return _make_api_request(url)
+    return await _make_api_request(url)
 
-def get_tft_league_entry_by_puuid(puuid: str, region: str) -> list[dict] | None:
+async def get_tft_league_entry_by_puuid(puuid: str, region: str) -> list[dict] | None:
     """
     Fragt die TFT-API nach den Ranglisten-Einträgen eines Spielers direkt über die PUUID ab.
     """
     logger.info(f"Querying TFT league entry for PUUID {puuid} in region {region}")
     # Der Endpunkt wurde von .../by-summoner/{summonerId} auf .../by-puuid/{puuid} geändert
     url = f"https://{region}.api.riotgames.com/tft/league/v1/by-puuid/{puuid}"
-    return _make_api_request(url)
+    return await _make_api_request(url)
     
-def get_tft_match_ids_by_puuid(puuid: str, region: str, count: int = 20) -> list[str] | None:
+async def get_tft_match_ids_by_puuid(puuid: str, region: str, count: int = 20) -> list[str] | None: 
     """Fragt die letzten Match-IDs eines Spielers anhand seiner PUUID ab."""
     logger.info(f"Querying last {count} TFT match IDs for PUUID {puuid} in region {region}")
     routing_value = _get_routing_value(region)
@@ -178,9 +191,9 @@ def get_tft_match_ids_by_puuid(puuid: str, region: str, count: int = 20) -> list
         return None
         
     url = f"https://{routing_value}.api.riotgames.com/tft/match/v1/matches/by-puuid/{puuid}/ids?count={count}"
-    return _make_api_request(url)
+    return await _make_api_request(url) 
 
-def get_tft_match_details(match_id: str, region: str) -> dict | None:
+async def get_tft_match_details(match_id: str, region: str) -> dict | None: 
     """Fragt die Details zu einem spezifischen Match anhand der Match-ID ab."""
     logger.info(f"Querying TFT match details for match ID {match_id} in region {region}")
     routing_value = _get_routing_value(region)
@@ -188,4 +201,4 @@ def get_tft_match_details(match_id: str, region: str) -> dict | None:
         return None
         
     url = f"https://{routing_value}.api.riotgames.com/tft/match/v1/matches/{match_id}"
-    return _make_api_request(url)
+    return await _make_api_request(url) 

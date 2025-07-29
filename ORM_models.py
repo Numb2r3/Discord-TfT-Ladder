@@ -14,7 +14,7 @@ class Player(Base):
 
     
     added_at = Column(DateTime,default=func.now(), nullable=False)
-
+    is_verified = Column(Boolean, default=False, nullable=False, index=True)
     def __repr__(self):
         return f"<Player(player_id='{self.player_id}', display_name='{self.display_name}')>"
 
@@ -211,7 +211,7 @@ class PlayerRiotAccountLink(Base):
     def __repr__(self):
         return (f"<PlayerRiotAccountLink(player_id='{self.player_id}', "
                 f"riot_account_id='{self.riot_account_id}', "
-                f"is_primary_riot_account={self.is_primary_riot_account})>', "
+                f"is_primary_riot_account='{self.is_primary_riot_account}', "
                 f"is_active={self.is_active})>")
     
 
@@ -233,9 +233,7 @@ class DiscordServer(Base):
     # added_at: Zeitpunkt, wann der Server in die DB aufgenommen wurde (d.h. wann der Bot beitrat).
     added_at = Column(DateTime, default=func.now(), nullable=False)
 
-    # last_active (Optional): Letzter Zeitpunkt der Bot-Aktivität auf diesem Server.
-    # Nützlich, um inaktive Server zu identifizieren.
-    last_active = Column(DateTime, nullable=True) # Default NULL, wird bei Aktivität aktualisiert
+    is_active = Column(Boolean, default=False, nullable=False, index=True)
 
     # Relationships (werden später hinzugefügt, wenn ServerPlayers und Races definiert sind)
     # server_players = relationship("ServerPlayer", back_populates="discord_server")
@@ -243,7 +241,7 @@ class DiscordServer(Base):
 
     def __repr__(self):
         return f"<DiscordServer(server_id='{self.server_id}', name='{self.server_name}')>"
-    
+        
 # In ORM_models.py, unter der DiscordServer-Klasse
 
 class ServerPlayer(Base):
@@ -256,14 +254,14 @@ class ServerPlayer(Base):
     # Verbindet diesen Eintrag mit dem spezifischen Discord-Server.
     server_id = Column(String(255), ForeignKey('discord_servers.server_id'), nullable=False)
 
-    # player_id (Foreign Key): Verweist auf Players.player_id.
+    # riot_account_id (Foreign Key): Verweist auf Riot-Accounts.riot_account_id.
     # Verbindet diesen Eintrag mit dem logischen Spieler.
-    player_id = Column(String(36), ForeignKey('players.player_id'), nullable=False)
+    riot_account_id = Column(String(36), ForeignKey('riot_accounts.riot_account_id'), nullable=False)
 
     # Zusätzlicher UNIQUE-Constraint, um doppelte Verknüpfungen zu verhindern
-    # Ein Paar aus server_id und player_id darf nur einmal vorkommen.
+    # Ein Paar aus server_id und riot_account_id darf nur einmal vorkommen.
     __table_args__ = (
-        UniqueConstraint('server_id', 'player_id', name='_server_player_uc'),
+        UniqueConstraint('server_id', 'riot_account_id', name='_server_riot_account_uc'),
     )
 
     # joined_server_at: Zeitpunkt, wann der Spieler auf diesem Server in deinem System hinzugefügt wurde.
@@ -277,11 +275,11 @@ class ServerPlayer(Base):
     # Relationships:
     # Direkte Beziehung zu den verknüpften Modellen
     discord_server = relationship("DiscordServer", backref="server_players")
-    player = relationship("Player", backref="server_links")
+    riot_account = relationship("RiotAccount", backref="server_links")
 
     def __repr__(self):
         return (f"<ServerPlayer(server_player_id='{self.server_player_id}', "
-                f"server_id='{self.server_id}', player_id='{self.player_id}', "
+                f"server_id='{self.server_id}', riot_account_id='{self.riot_account_id}', "
                 f"is_active={self.is_active_on_server})>")
     
 

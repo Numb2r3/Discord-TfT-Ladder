@@ -1,5 +1,5 @@
 from ORM_models import Base # Importiere nur Base, da alle Modelle daran registriert sind
-from sql_functions import get_engine_alchemy
+from sql_functions import get_engine_and_session_factory
 import logging
 from dotenv import load_dotenv
 
@@ -24,7 +24,7 @@ except Exception as e:
 def create_database_tables():
     logger.info("Starting database table creation process.", extra={'action': 'DB_CREATE_PROCESS_START'})
     try:
-        engine = get_engine_alchemy()
+        engine, SessionFactory = get_engine_and_session_factory()
         logger.info("Database engine successfully retrieved.", extra={'action': 'DB_ENGINE_READY'})
 
         # Erstelle alle in Base.metadata registrierten Tabellen in der Datenbank
