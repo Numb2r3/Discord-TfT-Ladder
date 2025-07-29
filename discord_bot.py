@@ -11,7 +11,6 @@ load_dotenv()
 # --- Logger Setup ---
 
 BOT_LOGGING_PREFIX = "DISCORD_BOT_"
-RIOT_API_KEY = os.getenv('RIOT_API_KEY')
 DISCORD_BOT_TOKEN = os.getenv('DISCORD_BOT_TOKEN')
 
 try:
@@ -27,22 +26,39 @@ except Exception as e:
     logger = logging.getLogger(f'{BOT_LOGGING_PREFIX}SetupErrorFallback') # Optional: Make fallback name more specific
 
 intents = discord.Intents.default()
-intents.message_content = True
 
-bot = commands.Bot(command_prefix='!', intents=intents)
+class MyBot(commands.Bot):
+    def __init__(self):
+        super().__init__(command_prefix='!', intents=intents) # Prefix isn't used for slash commands but is required
 
-@bot.event
-async def on_ready():
-    logger.info(f'Bot logged in as {bot.user.name} (ID:{bot.user.id})')
-    logger.info('Bot is ready and online')
+    async def setup_hook(self):
+        """This is called when the bot logs in, to load cogs."""
+        logger.info("--- Loading Cogs ---")
+        for filename in os.listdir('./cogs'):
+            if filename.endswith('.py'):
+                cog_name = f'cogs.{filename[:-3]}'
+                try:
+                    await self.load_extension(cog_name)
+                    logger.info(f"Successfully loaded cog: {cog_name}")
+                except Exception as e:
+                    logger.error(f"Failed to load cog {cog_name}: {e}")
+        
+        # This syncs the slash commands to Discord.
+        # You can specify a guild_id to make updates instant during testing.
+        GUILD_ID = discord.Object(id=os.getenv("DISCORD_GUILD_ID")) # Optional: Add your server ID to .env
+        self.tree.copy_global_to(guild=GUILD_ID)
+        await self.tree.sync(guild=GUILD_ID)
+        #await self.tree.sync() # Sync globally
+
+    async def on_ready(self):
+        """Event that runs when the bot is ready."""
+        logger.info(f'Bot logged in as {self.user.name} (ID:{self.user.id})')
+        logger.info('Bot is ready and online')
+        print("------")
+
+bot = MyBot()
 
 
-# --- Bot Commands ---
-@bot.command(name='ping')
-async def ping(ctx: commands.Context):
-    """A simple test command that replies with Pong!"""
-    logger.info(f"Received !ping command from {ctx.author.name}")
-    await ctx.reply("Pong!")
 
 
 # --- Run the Bot ---

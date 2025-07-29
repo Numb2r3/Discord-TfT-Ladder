@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 import time
 from collections import deque # KORREKTUR: Fehlender Import hinzugefügt
 from threading import Lock
-
+import constants
 load_dotenv()
 
 # --- Konfiguration ---
@@ -52,12 +52,6 @@ def parse_rate_limits(limits_str: str | None) -> list[tuple[int, int]]:
 RIOT_API_LIMITS_STR = os.getenv("RIOT_API_LIMITS")
 RATE_LIMITS = parse_rate_limits(RIOT_API_LIMITS_STR)
 
-RIOT_ROUTING = {
-    'americas': ['br1', 'la1', 'la2', 'na1'],
-    'asia': ['jp1', 'kr','oc1','sg2','tw2','vn2'],
-    'europe': ['eun1', 'euw1', 'tr1', 'ru','me1'],
-    'esports':['esports']
-}
     
 # --- Intelligente, Thread-sichere Rate Limiter Klasse ---
 class RateLimiter:
@@ -121,8 +115,16 @@ def _get_latest_api_key() -> str |None:
         return None
     
 def _get_routing_value(region:str) -> str |None:
-    for route, platforms in RIOT_ROUTING.items():
-        if region.lower() in platforms:
+
+    normalized_region = region.lower().strip()
+    if normalized_region in constants.REGION_CORRECTIONS:
+        corrected_region = constants.REGION_CORRECTIONS[normalized_region] 
+        logger.info(f"Region '{region}' korrigiert zu '{corrected_region}'.",
+                    extra={'action': 'REGION_CORRECTION', 'original': region, 'corrected': corrected_region})
+        normalized_region = corrected_region
+
+    for route, platforms in constants.RIOT_ROUTING.items(): 
+        if normalized_region in platforms:
             return route
     logger.error(f"Could not find a routing value for region: {region}")
     return None
@@ -135,7 +137,6 @@ def _make_api_request(url: str) -> dict | list | None:
         return None
     
     headers = {"X-Riot-Token": api_key}
-    time.sleep(1.2)
     
     try:
         response = requests.get(url, headers=headers, timeout=10)

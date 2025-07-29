@@ -20,7 +20,7 @@ except Exception as e:
     logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(levelname)s - FALLBACK - %(message)s')
     logger = logging.getLogger(f'{USER_PY_LOGGING_PREFIX}SetupErrorFallback')
 
-def sync_riot_account_by_riot_id(game_name: str, tag_line: str, region: str) -> RiotAccount | None:
+async def sync_riot_account_by_riot_id(game_name: str, tag_line: str, region: str) -> RiotAccount | None:
     """
     Orchestriert den Prozess, einen Riot Account zu holen und in der DB zu speichern/aktualisieren.
     
@@ -38,7 +38,7 @@ def sync_riot_account_by_riot_id(game_name: str, tag_line: str, region: str) -> 
     logger.info(f"Starting sync for Riot account: {game_name}#{tag_line}")
     
     # 1. Daten von der Riot API abrufen
-    api_data = api.get_account_by_riot_id(game_name, tag_line, region)
+    api_data = await api.get_account_by_riot_id(game_name, tag_line, region)
     
     if not api_data:
         logger.error(f"Could not retrieve Riot account data for {game_name}#{tag_line} from API.")
@@ -132,7 +132,7 @@ def sync_tft_rank_for_account(riot_account: RiotAccount) -> RiotAccountLPHistory
 
     return new_history_entry
 
-def register_new_player_with_riot_id(game_name: str, tag_line: str, region: str, player_display_name: str | None = None) -> tuple[Player, RiotAccount] | None:
+async def register_new_player_with_riot_id(game_name: str, tag_line: str, region: str, player_display_name: str | None = None) -> tuple[Player, RiotAccount] | None:
     """
     Orchestrates the full registration of a new player using their Riot ID.
     
@@ -157,7 +157,7 @@ def register_new_player_with_riot_id(game_name: str, tag_line: str, region: str,
 
     # --- Step 1: Get or Create the Riot Account ---
     # This uses an existing function to sync the account with the Riot API and our DB.
-    riot_account = sync_riot_account_by_riot_id(game_name, tag_line, region)
+    riot_account = await sync_riot_account_by_riot_id(game_name, tag_line, region)
     if not riot_account:
         logger.error("Player registration failed: Could not sync Riot account.",
                      extra={'action': 'PLAYER_REGISTRATION_FAIL_RIOT_SYNC', **action_details})
