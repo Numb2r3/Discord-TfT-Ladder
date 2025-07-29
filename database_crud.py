@@ -1,25 +1,25 @@
 import uuid
+import sys
 from contextlib import contextmanager
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import sessionmaker, joinedload
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.sql import func
 import logging
 from datetime import datetime
-from sql_functions import get_engine_and_session_factory
-
 
 # --- Local Imports ---
+from sql_functions import get_engine_and_session_factory
 from ORM_models import (
     Base, Player, PlayerDisplayNameHistory, DiscordAccount,
-    PlayerDiscordAccountLink, RiotAccount, RiotAccountNameHistory,RiotAccountLPHistory,
-
-    PlayerRiotAccountLink, DiscordServer, ServerPlayer, Race, RaceParticipant
+    PlayerDiscordAccountLink, RiotAccount, RiotAccountNameHistory, RiotAccountLPHistory,PlayerRiotAccountLink, 
+    DiscordServer, ServerPlayer, Race, RaceParticipant
 )
+
 # --- Initial Setup ---
 USER_PY_LOGGING_PREFIX = "CRUD_"
 
 try:
-    import logging_setup 
+    import logging_setup
     logger = logging_setup.setup_project_logger(env_prefix=USER_PY_LOGGING_PREFIX)
 except ImportError:
     print(f"Error: Cannot find the 'logging_setup.py' module (for {USER_PY_LOGGING_PREFIX}).", file=sys.stderr)
@@ -61,12 +61,13 @@ def add_player(display_name:str) -> Player | None:
         # The error is already logged by session_scope, so we just return None.
         return None
     
-def get_player_by_id(player_id:str) -> Player | None:
+def get_player_by_id(player_id: str, load_options: list = None) -> Player | None:
     """
     Retrieves a player from the database by their unique player_id.
 
     Args:
         player_id: The UUID of the player to retrieve.
+        load_options (optional): A list of SQLAlchemy loader options for eager loading.
 
     Returns:
         The Player object if found, otherwise None.
@@ -74,7 +75,11 @@ def get_player_by_id(player_id:str) -> Player | None:
     logger.debug(f"Querying for player with ID '{player_id}'.", extra={'action': 'GET_PLAYER_BY_ID'})
     try:
         with session_scope() as session:
-            player = session.query(Player).filter_by(player_id=player_id).first()
+            query = session.query(Player)
+            if load_options:
+                query = query.options(*load_options)
+            
+            player = query.filter_by(player_id=player_id).first()
             if player:
                 logger.debug(f"Found player '{player.display_name}'.", extra={'entity_id': player_id})
             return player
@@ -152,7 +157,7 @@ def add_or_update_riot_account(puuid: str, game_name: str, tag_line: str, region
 
     try:
         with session_scope() as session:
-            # Check if the account already exists
+            # Check if the account already exists and eager load relationships
             account = session.query(RiotAccount).options(
                         joinedload(RiotAccount.player_links).joinedload(PlayerRiotAccountLink.player)
                         ).filter_by(puuid=puuid).first()
@@ -169,6 +174,9 @@ def add_or_update_riot_account(puuid: str, game_name: str, tag_line: str, region
                 session.flush() # Ensure riot_account_id is available
                 logger.info(f"Created new Riot account for '{game_name}#{tag_line}'.",
                             extra={'action': 'ADD_RIOT_ACCOUNT_SUCCESS', 'entity_id': new_account.riot_account_id, **action_details})
+                
+                new_account.player_links = []
+
                 return new_account
             else:
                 # --- Update Existing Account ---
@@ -205,12 +213,13 @@ def add_or_update_riot_account(puuid: str, game_name: str, tag_line: str, region
         return None
 
 
-def get_riot_account_by_puuid(puuid: str) -> RiotAccount | None:
+def get_riot_account_by_puuid(puuid: str, load_options: list = None) -> RiotAccount | None:
     """
     Retrieves a Riot account from the database by its unique PUUID.
 
     Args:
         puuid: The PUUID of the account to retrieve.
+        load_options (optional): A list of SQLAlchemy loader options for eager loading.
 
     Returns:
         The RiotAccount object if found, otherwise None.
@@ -218,7 +227,11 @@ def get_riot_account_by_puuid(puuid: str) -> RiotAccount | None:
     logger.debug(f"Querying for Riot account with PUUID '{puuid}'.", extra={'action': 'GET_RIOT_BY_PUUID'})
     try:
         with session_scope() as session:
-            account = session.query(RiotAccount).filter_by(puuid=puuid).first()
+            query = session.query(RiotAccount)
+            if load_options:
+                query = query.options(*load_options)
+            
+            account = query.filter_by(puuid=puuid).first()
             if account:
                 logger.debug(f"Found Riot account '{account.game_name}#{account.tag_line}'.", extra={'entity_id': account.riot_account_id})
             return account
@@ -312,7 +325,7 @@ def deactivate_riot_link(player_id: str, riot_account_id: str) -> bool:
     
 # --- Discord Account Functions ---
 
-def add_or_update_discord_account(discord_user_id: str, username: str, discriminator: str | None = None) -> DiscordAccount | None:
+def add_or_update_discord_account(discord_user_id: str, username: str, discriminator: str | None = None, load_options: list = None) -> DiscordAccount | None:
     """
     Adds a new Discord account or updates an existing one based on the discord_user_id.
 
@@ -320,6 +333,7 @@ def add_or_update_discord_account(discord_user_id: str, username: str, discrimin
         discord_user_id: The unique Discord User ID.
         username: The current Discord username.
         discriminator: The 4-digit discriminator (for older usernames, can be None).
+        load_options (optional): A list of SQLAlchemy loader options for eager loading.
 
     Returns:
         The created or updated DiscordAccount object, or None on error.
@@ -330,7 +344,10 @@ def add_or_update_discord_account(discord_user_id: str, username: str, discrimin
 
     try:
         with session_scope() as session:
-            account = session.query(DiscordAccount).filter_by(discord_user_id=discord_user_id).first()
+            query = session.query(DiscordAccount)
+            if load_options:
+                query = query.options(*load_options)
+            account = query.filter_by(discord_user_id=discord_user_id).first()
 
             if not account:
                 # --- Create New Account ---
@@ -343,6 +360,9 @@ def add_or_update_discord_account(discord_user_id: str, username: str, discrimin
                 session.flush()
                 logger.info(f"Created new Discord account for '{username}'.",
                             extra={'action': 'ADD_DISCORD_ACCOUNT_SUCCESS', 'entity_id': new_account.discord_account_id, **action_details})
+                
+                new_account.player_links = []
+
                 return new_account
             else:
                 # --- Update Existing Account ---
