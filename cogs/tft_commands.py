@@ -4,6 +4,7 @@ from discord import app_commands
 import logging
 import sys
 import data_manager
+from datetime import datetime, timezone
 
 USER_PY_LOGGING_PREFIX = "TFT_COG_"
 try:
@@ -71,6 +72,44 @@ class TFTCommands(commands.Cog):
 
         await interaction.followup.send(message, ephemeral=True)
 
+    @app_commands.command(name="rank", description="Zeigt den aktuellen Rang eines getrackten Spielers an.")
+    @app_commands.describe(game_name="Der Riot Game Name", tag_line="Die Tag Line (ohne #)")
+    async def rank(self, interaction: discord.Interaction, game_name: str, tag_line: str):
+        """Fragt den aktuellen Rang ab, aktualisiert die DB und gibt ihn aus."""
+        await interaction.response.defer(ephemeral=True)
+
+        # EIN EINZIGER, SAUBERER AUFRUF an den data_manager
+        result = await data_manager.get_synced_rank_for_account(game_name, tag_line)
+
+        # Ergebnis auswerten
+
+        if isinstance(result, str): # Prüft, ob ein Status-String wie 'NOT_FOUND' zurückkam
+            if result == 'NOT_FOUND':
+                message = f"Der Riot Account **{game_name}#{tag_line}** ist nicht registriert."
+            else: # Fall 'NO_HISTORY' oder andere Fehler
+                message = f"Für **{game_name}#{tag_line}** konnten keine Ranglisten-Daten gefunden werden."
+        else:
+            # Wir entpacken das erfolgreiche Tupel
+            riot_account, lp_history_entry = result
+            
+            # KEIN FEHLER MEHR: Wir greifen direkt auf das separate riot_account-Objekt zu
+            account_name = f"**{riot_account.game_name}#{riot_account.tag_line}**"
+            
+            now_utc = datetime.now(timezone.utc)
+            data_age = now_utc - lp_history_entry.retrieved_at.replace(tzinfo=timezone.utc)
+            
+            message = (
+                f"Rang für {account_name}:\n"
+                f"> **{lp_history_entry.tier.capitalize()} {lp_history_entry.division}**\n"
+                f"> **{lp_history_entry.league_points} LP**\n"
+                f"> Wins: {lp_history_entry.wins} | Losses: {lp_history_entry.losses}"
+            )
+
+            if data_age.total_seconds() > 300:
+                timestamp_discord = f"<t:{int(lp_history_entry.retrieved_at.timestamp())}:R>"
+                message += f"\n\n*Achtung: Die Daten sind nicht live (Stand: {timestamp_discord}).*"
+
+        await interaction.followup.send(message, ephemeral=True)
 
 # Diese Async-Setup-Funktion ist erforderlich, damit der Cog vom Bot geladen werden kann
 async def setup(bot: commands.Bot):

@@ -114,9 +114,14 @@ def _get_latest_api_key_sync() -> str | None:
         logger.error(f"Network error while fetching API key from Gist: {e}")
         return None
     
-def _get_routing_value(region:str) -> str |None:
-
+def _get_routing_value(region:str) -> tuple[str,str] |None:
+    
+    """
+    Ermittelt den Routing-Wert für die Riot API und korrigiert die Region.
+    Gibt ein Tuple (routing_value, corrected_platform_region) oder None zurück.
+    """
     normalized_region = region.lower().strip()
+    corrected_region = normalized_region
     if normalized_region in constants.REGION_CORRECTIONS:
         corrected_region = constants.REGION_CORRECTIONS[normalized_region] 
         logger.info(f"Region '{region}' korrigiert zu '{corrected_region}'.",
@@ -124,12 +129,13 @@ def _get_routing_value(region:str) -> str |None:
         normalized_region = corrected_region
 
     for route, platforms in constants.RIOT_ROUTING.items(): 
-        if normalized_region in platforms:
-            return route
+        if corrected_region in platforms:
+            return route, corrected_region
+        
     logger.error(f"Could not find a routing value for region: {region}")
-    return None
+    return None, None
 
-async def _make_api_request(url: str) -> dict | list | None:
+async def _make_api_request(url: str,region_for_logging: str) -> dict | list | None:
     """Führt eine Anfrage an die Riot-API aus, wartet auf das Rate-Limit und nutzt einen Executor."""
 
     await riot_rate_limiter.acquire()
@@ -167,38 +173,43 @@ async def _make_api_request(url: str) -> dict | list | None:
 async def get_account_by_riot_id(game_name: str, tag_line: str, region: str) -> dict | None:
     """Fragt die Riot API nach einem Account anhand der Riot ID und der Region ab."""
     logger.info(f"Querying Riot account for {game_name}#{tag_line} in region {region}")
-    routing_value = _get_routing_value(region)
+    routing_value, corrected_region_for_db = _get_routing_value(region)
     if not routing_value:
         return None
     
     url = f"https://{routing_value}.api.riotgames.com/riot/account/v1/accounts/by-riot-id/{game_name}/{tag_line}"
-    return await _make_api_request(url)
+    # Übergebe die ursprüngliche Region für besseres Logging, falls nötig
+    api_response = await _make_api_request(url, region)
+
+    # Hänge die korrigierte Region an das API-Ergebnis an, damit data_manager sie verwenden kann
+    if api_response:
+        api_response['correctedRegion'] = corrected_region_for_db
+    return api_response
 
 async def get_tft_league_entry_by_puuid(puuid: str, region: str) -> list[dict] | None:
     """
     Fragt die TFT-API nach den Ranglisten-Einträgen eines Spielers direkt über die PUUID ab.
     """
     logger.info(f"Querying TFT league entry for PUUID {puuid} in region {region}")
-    # Der Endpunkt wurde von .../by-summoner/{summonerId} auf .../by-puuid/{puuid} geändert
     url = f"https://{region}.api.riotgames.com/tft/league/v1/by-puuid/{puuid}"
-    return await _make_api_request(url)
-    
+    return await _make_api_request(url, region) # Region für Logging
+
 async def get_tft_match_ids_by_puuid(puuid: str, region: str, count: int = 20) -> list[str] | None: 
     """Fragt die letzten Match-IDs eines Spielers anhand seiner PUUID ab."""
     logger.info(f"Querying last {count} TFT match IDs for PUUID {puuid} in region {region}")
-    routing_value = _get_routing_value(region)
+    routing_value, _ = _get_routing_value(region) # Nur routing_value hier nötig
     if not routing_value:
         return None
-        
+
     url = f"https://{routing_value}.api.riotgames.com/tft/match/v1/matches/by-puuid/{puuid}/ids?count={count}"
-    return await _make_api_request(url) 
+    return await _make_api_request(url, region) # Region für Logging
 
 async def get_tft_match_details(match_id: str, region: str) -> dict | None: 
     """Fragt die Details zu einem spezifischen Match anhand der Match-ID ab."""
     logger.info(f"Querying TFT match details for match ID {match_id} in region {region}")
-    routing_value = _get_routing_value(region)
+    routing_value, _ = _get_routing_value(region) # Nur routing_value hier nötig
     if not routing_value:
         return None
-        
+
     url = f"https://{routing_value}.api.riotgames.com/tft/match/v1/matches/{match_id}"
-    return await _make_api_request(url) 
+    return await _make_api_request(url, region) # Region für Logging

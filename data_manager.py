@@ -50,11 +50,13 @@ async def sync_riot_account_by_riot_id(game_name: str, tag_line: str, region: st
     puuid = api_data.get('puuid')
     api_game_name = api_data.get('gameName')
     api_tag_line = api_data.get('tagLine')
+    corrected_region = api_data.get('correctedRegion') 
     
-    if not all([puuid, api_game_name, api_tag_line]):
-        logger.error("Incomplete data received from Riot API.")
+    if not all([puuid, api_game_name, api_tag_line, corrected_region]): # corrected_region hinzugefügt
+        logger.error("Incomplete data received from Riot API or missing corrected region.")
         return None
-        
+
+
     # 3. Datenbank mit den neuen Daten aktualisieren oder neuen Account erstellen
     # Hier wird deine existierende CRUD-Funktion aufgerufen!
     loop = asyncio.get_running_loop()
@@ -64,7 +66,7 @@ async def sync_riot_account_by_riot_id(game_name: str, tag_line: str, region: st
             puuid=puuid,
             game_name=api_game_name,
             tag_line=api_tag_line,
-            region=region
+            region=corrected_region
         )
     )
     
@@ -179,3 +181,71 @@ async def handle_riot_account_registration(server_id: str, game_name: str, tag_l
     
     # --- Step 3: Return the result ---
     return riot_account, status
+
+async def get_synced_rank_for_account(game_name: str, tag_line: str) -> tuple[RiotAccount, RiotAccountLPHistory] | str:
+    """
+    Sucht einen Riot Account in der DB, synchronisiert die neuesten LP-Daten
+    und gibt den neuesten History-Eintrag zurück.
+    Gibt 'NOT_FOUND' zurück, wenn der Account nicht in der DB ist.
+    """
+    # Schritt 1: Finde den Account in unserer DB
+    loop = asyncio.get_running_loop()
+    riot_account = await loop.run_in_executor(
+        None,
+        lambda: crud.get_riot_account_by_name(game_name, tag_line)
+    )
+
+    if not riot_account:
+        return 'NOT_FOUND'
+
+    # Schritt 2: Rufe die existierende Kernlogik auf, um die neuesten Daten zu holen und zu speichern
+    live_lp_history = await sync_tft_rank_for_account(riot_account)
+    if live_lp_history:
+        # Fall A: Live-Sync war erfolgreich, gib die frischen Daten zurück
+        return riot_account, live_lp_history
+    else:
+        # Fall B: Live-Sync schlug fehl. Hole die letzten Daten aus der DB.
+        logger.warning(f"Live-Sync für {riot_account.game_name} fehlgeschlagen. Versuche Fallback auf DB-Daten.")
+        fallback_lp_history = await loop.run_in_executor(
+            None,
+            lambda: crud.get_latest_lp_history(riot_account.riot_account_id)
+        )
+        
+        if fallback_lp_history:
+            # Erfolg: Gib den Account und die alten Daten zurück
+            return riot_account, fallback_lp_history
+        else:
+            # Kein Fallback möglich
+            return 'NO_HISTORY'
+    
+async def handle_periodic_rank_update():
+    """
+    Holt alle getrackten Accounts und synchronisiert deren Ranglisten-Daten.
+    Diese Funktion ist für den Aufruf durch einen periodischen Task gedacht.
+    """
+    logger.info("DATA_MANAGER: Starting periodic rank update process.")
+    loop = asyncio.get_running_loop()
+
+    # Schritt 1: Alle Accounts aus der DB holen
+    tracked_accounts = await loop.run_in_executor(None, crud.get_all_tracked_riot_accounts)
+    
+    if not tracked_accounts:
+        logger.info("DATA_MANAGER: No tracked accounts found. Skipping periodic run.")
+        return
+
+    logger.info(f"DATA_MANAGER: Found {len(tracked_accounts)} accounts to update.")
+    
+    # Schritt 2: Durch alle Accounts iterieren und sie einzeln synchronisieren
+    updated_count = 0
+    for account in tracked_accounts:
+        try:
+            # Wir rufen die bereits existierende Funktion für einzelne Accounts auf
+            result = await sync_tft_rank_for_account(account)
+            if result:
+                updated_count += 1
+            # Die proaktive Pause gehört hierher, um die API-Aufrufe zu verteilen
+            await asyncio.sleep(0.8) 
+        except Exception as e:
+            logger.error(f"DATA_MANAGER: Error updating rank for {account.puuid} during periodic task: {e}")
+
+    logger.info(f"DATA_MANAGER: Finished periodic rank update. Successfully updated {updated_count}/{len(tracked_accounts)} accounts.")

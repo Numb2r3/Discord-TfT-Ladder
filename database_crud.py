@@ -738,3 +738,76 @@ def add_account_to_server(server_id: str, riot_account_id: str) -> str | None:
             return 'ADDED'
     except SQLAlchemyError:
         return None
+    
+def get_riot_account_by_name(game_name: str, tag_line: str) -> RiotAccount | None:
+    """Findet einen RiotAccount anhand des Namens und der Tagline."""
+    try:
+        with session_scope() as session:
+            account = session.query(RiotAccount).filter_by(
+                game_name=game_name, 
+                tag_line=tag_line
+            ).first()
+            return account
+    except SQLAlchemyError:
+        return None
+    
+def get_latest_lp_history(riot_account_id: str) -> RiotAccountLPHistory | None:
+    """Holt den neuesten LP-History-Eintrag für einen Riot Account aus der DB."""
+    try:
+        with session_scope() as session:
+            # Finde den letzten Eintrag, indem nach dem Abrufzeitpunkt absteigend sortiert wird
+            latest_entry = session.query(RiotAccountLPHistory)\
+                .filter_by(riot_account_id=riot_account_id)\
+                .order_by(RiotAccountLPHistory.retrieved_at.desc())\
+                .first()
+            return latest_entry
+    except SQLAlchemyError:
+        return None
+    
+def get_all_tracked_riot_accounts() -> list[RiotAccount]:
+    """Holt alle RiotAccounts, die in der ServerPlayer-Tabelle verknüpft sind."""
+    try:
+        with session_scope() as session:
+            # Finde alle einzigartigen riot_account_ids in ServerPlayer
+            # und lade dann die zugehörigen RiotAccount-Objekte
+            tracked_accounts = session.query(RiotAccount).join(ServerPlayer).distinct().all()
+            return tracked_accounts
+    except SQLAlchemyError:
+        return []
+    
+def get_server_rank_for_account(server_id: str, riot_account_id: str) -> tuple[int, int] | None:
+    """
+    Berechnet den LP-Rang eines Accounts auf einem Server und die Gesamtzahl der gerankten Spieler.
+    Gibt ein Tupel (Rang, Gesamtanzahl) oder None bei einem Fehler zurück.
+    """
+    try:
+        with session_scope() as session:
+            # ... (die Subquery "latest_entries_sq" bleibt exakt gleich)
+            latest_entries_sq = session.query(
+                RiotAccountLPHistory.riot_account_id,
+                func.max(RiotAccountLPHistory.retrieved_at).label('max_retrieved_at')
+            ).join(ServerPlayer, ServerPlayer.riot_account_id == RiotAccountLPHistory.riot_account_id)\
+            .filter(ServerPlayer.server_id == server_id)\
+            .group_by(RiotAccountLPHistory.riot_account_id).subquery()
+
+            server_leaderboard = session.query(
+                RiotAccountLPHistory.riot_account_id
+            ).join(
+                latest_entries_sq,
+                (RiotAccountLPHistory.riot_account_id == latest_entries_sq.c.riot_account_id) &
+                (RiotAccountLPHistory.retrieved_at == latest_entries_sq.c.max_retrieved_at)
+            ).order_by(RiotAccountLPHistory.league_points.desc()).all()
+
+            ranked_ids = [row.riot_account_id for row in server_leaderboard]
+            total_players = len(ranked_ids) # Die Gesamtzahl der Spieler
+
+            if riot_account_id in ranked_ids:
+                rank = ranked_ids.index(riot_account_id) + 1
+                # Gib den Rang und die Gesamtanzahl als Tupel zurück
+                return rank, total_players
+            else:
+                return None
+                
+    except SQLAlchemyError as e:
+        logger.error(f"Error calculating server rank: {e}")
+        return None
