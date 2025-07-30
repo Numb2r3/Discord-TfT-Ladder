@@ -4,6 +4,8 @@ from discord import app_commands # Import for slash commands
 import logging
 import sys
 
+from utils.checks import is_in_allowed_channels
+
 USER_PY_LOGGING_PREFIX = "GENERAL_COG_" # Ein eindeutiger Präfix für diesen Cog
 try:
     import logging_setup 
@@ -29,6 +31,7 @@ class General(commands.Cog):
 
     # This is now a slash command. The user will type /ping
     @app_commands.command(name="ping", description="Replies with Pong!")
+    @app_commands.check(is_in_allowed_channels)
     async def ping(self, interaction: discord.Interaction):
         """A simple test slash command that replies with Pong!"""
         # 'interaction.response.send_message' is how you reply to slash commands

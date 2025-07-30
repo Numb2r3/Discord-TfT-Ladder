@@ -4,6 +4,8 @@ import asyncio
 import data_manager
 import database_crud as crud
 
+from utils.checks import is_in_allowed_channels
+
 USER_PY_LOGGING_PREFIX = "TASKS_COG_"
 
 try:

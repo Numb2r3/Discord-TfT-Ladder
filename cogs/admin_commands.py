@@ -5,6 +5,8 @@ import logging
 import sys
 import data_manager
 
+from utils.checks import is_in_allowed_channels
+
 USER_PY_LOGGING_PREFIX = "ADMIN_COG_"
 
 try:
@@ -25,6 +27,7 @@ class AdminCommands(commands.Cog):
         self.bot = bot
         logger.info(f"{USER_PY_LOGGING_PREFIX} Cog initialisiert.")
     @app_commands.command(name="activate-server", description="Aktiviert diesen Server für alle Bot-Features.")
+    @app_commands.check(is_in_allowed_channels)
     @app_commands.checks.has_permissions(administrator=True) # SICHERHEIT: Nur der Serveradmin kann diesen Befehl nutzen
     async def activate_server(self, interaction: discord.Interaction):
 

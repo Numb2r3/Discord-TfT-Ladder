@@ -6,6 +6,8 @@ import sys
 import data_manager
 from datetime import datetime, timezone
 
+from utils.checks import is_in_allowed_channels
+
 USER_PY_LOGGING_PREFIX = "TFT_COG_"
 try:
     import logging_setup 
@@ -30,6 +32,7 @@ class TFTCommands(commands.Cog):
         logger.info(f"{USER_PY_LOGGING_PREFIX} hat sich mit Discord verbunden.")
 
     @app_commands.command(name="register", description="Registriert deinen Riot Account für TFT-Tracking.")
+    @app_commands.check(is_in_allowed_channels)
     @app_commands.describe(
         game_name="Dein Riot Game Name (z.B. 'Der_Grosse_Spieler')",
         tag_line="Deine Tag Line (z.B. 'EUW' - OHNE #)",
@@ -73,6 +76,7 @@ class TFTCommands(commands.Cog):
         await interaction.followup.send(message, ephemeral=True)
 
     @app_commands.command(name="rank", description="Zeigt den aktuellen Rang eines getrackten Spielers an.")
+    @app_commands.check(is_in_allowed_channels)
     @app_commands.describe(game_name="Der Riot Game Name", tag_line="Die Tag Line (ohne #)")
     async def rank(self, interaction: discord.Interaction, game_name: str, tag_line: str):
         """Fragt den aktuellen Rang ab, aktualisiert die DB und gibt ihn aus."""
