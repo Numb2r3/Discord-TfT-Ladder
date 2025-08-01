@@ -7,6 +7,7 @@ RIOT_ROUTING = {
     'europe': ['eun1', 'euw1', 'tr1', 'ru','me1'],
     'esports':['esports']
 }
+VALID_REGIONS = {'br1', 'eun1', 'euw1', 'jp1', 'kr', 'la1', 'la2', 'na1', 'oc1', 'tr1', 'ru', 'sg2', 'tw2', 'vn2'}
 
 # Mapping für gängige Tippfehler bei Regionen zu den korrekten API-Regionen
 REGION_CORRECTIONS = {
