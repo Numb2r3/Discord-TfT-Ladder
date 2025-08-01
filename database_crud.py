@@ -3,7 +3,7 @@ import sys
 from contextlib import contextmanager
 from sqlalchemy.orm import sessionmaker, joinedload
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.sql import func
+from sqlalchemy.sql import func, case
 import logging
 from datetime import datetime
 
@@ -743,9 +743,9 @@ def get_riot_account_by_name(game_name: str, tag_line: str) -> RiotAccount | Non
     """Findet einen RiotAccount anhand des Namens und der Tagline."""
     try:
         with session_scope() as session:
-            account = session.query(RiotAccount).filter_by(
-                game_name=game_name, 
-                tag_line=tag_line
+            account = session.query(RiotAccount).filter(
+                RiotAccount.game_name.ilike(game_name),
+                RiotAccount.tag_line.ilike(tag_line)
             ).first()
             return account
     except SQLAlchemyError:
@@ -775,14 +775,13 @@ def get_all_tracked_riot_accounts() -> list[RiotAccount]:
     except SQLAlchemyError:
         return []
     
-def get_server_rank_for_account(server_id: str, riot_account_id: str) -> tuple[int, int] | None:
+def get_server_leaderboard(server_id: str) -> list[tuple[RiotAccount, RiotAccountLPHistory]]:
     """
-    Berechnet den LP-Rang eines Accounts auf einem Server und die Gesamtzahl der gerankten Spieler.
-    Gibt ein Tupel (Rang, Gesamtanzahl) oder None bei einem Fehler zurück.
+    Holt das komplette, sortierte Server-Leaderboard aus der Datenbank.
+    Dies ist jetzt die ZENTRALE Funktion für alle Leaderboard-Daten.
     """
     try:
         with session_scope() as session:
-            # ... (die Subquery "latest_entries_sq" bleibt exakt gleich)
             latest_entries_sq = session.query(
                 RiotAccountLPHistory.riot_account_id,
                 func.max(RiotAccountLPHistory.retrieved_at).label('max_retrieved_at')
@@ -791,23 +790,87 @@ def get_server_rank_for_account(server_id: str, riot_account_id: str) -> tuple[i
             .group_by(RiotAccountLPHistory.riot_account_id).subquery()
 
             server_leaderboard = session.query(
-                RiotAccountLPHistory.riot_account_id
+                RiotAccount,
+                RiotAccountLPHistory
             ).join(
                 latest_entries_sq,
                 (RiotAccountLPHistory.riot_account_id == latest_entries_sq.c.riot_account_id) &
                 (RiotAccountLPHistory.retrieved_at == latest_entries_sq.c.max_retrieved_at)
-            ).order_by(RiotAccountLPHistory.league_points.desc()).all()
+            ).join(RiotAccount, RiotAccount.riot_account_id == RiotAccountLPHistory.riot_account_id)\
+            .order_by(RiotAccountLPHistory.league_points.desc()).all()
 
-            ranked_ids = [row.riot_account_id for row in server_leaderboard]
-            total_players = len(ranked_ids) # Die Gesamtzahl der Spieler
+            tier_order = case(
+                (RiotAccountLPHistory.tier == 'CHALLENGER', 8),
+                (RiotAccountLPHistory.tier == 'GRANDMASTER', 7),
+                (RiotAccountLPHistory.tier == 'MASTER', 6),
+                (RiotAccountLPHistory.tier == 'DIAMOND', 5),
+                (RiotAccountLPHistory.tier == 'EMERALD', 4),
+                (RiotAccountLPHistory.tier == 'PLATINUM', 3),
+                (RiotAccountLPHistory.tier == 'GOLD', 2),
+                (RiotAccountLPHistory.tier == 'SILVER', 1),
+                (RiotAccountLPHistory.tier == 'BRONZE', 0),
+                (RiotAccountLPHistory.tier == 'IRON', -1),
+                else_=-2
+            ).label('tier_order')
 
-            if riot_account_id in ranked_ids:
-                rank = ranked_ids.index(riot_account_id) + 1
-                # Gib den Rang und die Gesamtanzahl als Tupel zurück
-                return rank, total_players
-            else:
-                return None
-                
+            # Dasselbe für die Divisionen (I ist besser als IV).
+            division_order = case(
+                (RiotAccountLPHistory.division == 'I', 4),
+                (RiotAccountLPHistory.division == 'II', 3),
+                (RiotAccountLPHistory.division == 'III', 2),
+                (RiotAccountLPHistory.division == 'IV', 1),
+                else_=0
+            ).label('division_order')
+
+            server_leaderboard = session.query(
+                RiotAccount,
+                RiotAccountLPHistory
+            ).join(
+                latest_entries_sq,
+                (RiotAccountLPHistory.riot_account_id == latest_entries_sq.c.riot_account_id) &
+                (RiotAccountLPHistory.retrieved_at == latest_entries_sq.c.max_retrieved_at)
+            ).join(RiotAccount, RiotAccount.riot_account_id == RiotAccountLPHistory.riot_account_id)\
+            .order_by(
+                tier_order.desc(), 
+                division_order.desc(), 
+                RiotAccountLPHistory.league_points.desc()
+            ).all()
+            
+            return server_leaderboard
     except SQLAlchemyError as e:
-        logger.error(f"Error calculating server rank: {e}")
+        logger.error(f"Error fetching server leaderboard: {e}")
+        return []
+    
+    
+def get_server_rank_for_account(server_id: str, riot_account_id: str) -> tuple[int, int] | None:
+    """
+    Calculates the LP rank of an account on a server and the total number of ranked players.
+    
+    This query first finds the latest LP entry for every player tracked on the server,
+    then orders them by LP to determine the rank.
+
+    Args:
+        server_id: The ID of the server to rank against.
+        riot_account_id: The ID of the Riot account to find the rank for.
+
+    Returns:
+        A tuple (rank, total_players) or None if the player isn't ranked on the server.
+    """
+    try:
+        leaderboard = get_server_leaderboard(server_id)
+        if not leaderboard:
+            return None
+
+        # Find the rank in the Python list
+        ranked_ids = [account.riot_account_id for account, history in leaderboard]
+        total_players = len(ranked_ids)
+
+        if riot_account_id in ranked_ids:
+            rank = ranked_ids.index(riot_account_id) + 1
+            return rank, total_players
+        else:
+            return None # Player is not on the server's leaderboard
+                
+    except Exception as e:
+        logger.error(f"Error processing leaderboard list to find rank: {e}")
         return None

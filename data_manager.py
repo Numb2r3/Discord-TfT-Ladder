@@ -22,7 +22,7 @@ except Exception as e:
     logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(levelname)s - FALLBACK - %(message)s')
     logger = logging.getLogger(f'{USER_PY_LOGGING_PREFIX}SetupErrorFallback')
 
-async def sync_riot_account_by_riot_id(game_name: str, tag_line: str, region: str) -> RiotAccount | None:
+async def sync_riot_account_by_riot_id(game_name: str, tag_line: str, api_region: str, db_region) -> RiotAccount | None:
     """
     Orchestriert den Prozess, einen Riot Account zu holen und in der DB zu speichern/aktualisieren.
     
@@ -40,7 +40,7 @@ async def sync_riot_account_by_riot_id(game_name: str, tag_line: str, region: st
     logger.info(f"Starting sync for Riot account: {game_name}#{tag_line}")
     
     # 1. Daten von der Riot API abrufen
-    api_data = await api.get_account_by_riot_id(game_name, tag_line, region)
+    api_data = await api.get_account_by_riot_id(game_name, tag_line, api_region)
     
     if not api_data:
         logger.error(f"Could not retrieve Riot account data for {game_name}#{tag_line} from API.")
@@ -50,9 +50,8 @@ async def sync_riot_account_by_riot_id(game_name: str, tag_line: str, region: st
     puuid = api_data.get('puuid')
     api_game_name = api_data.get('gameName')
     api_tag_line = api_data.get('tagLine')
-    corrected_region = api_data.get('correctedRegion') 
     
-    if not all([puuid, api_game_name, api_tag_line, corrected_region]): # corrected_region hinzugefügt
+    if not all([puuid, api_game_name, api_tag_line]): 
         logger.error("Incomplete data received from Riot API or missing corrected region.")
         return None
 
@@ -66,7 +65,7 @@ async def sync_riot_account_by_riot_id(game_name: str, tag_line: str, region: st
             puuid=puuid,
             game_name=api_game_name,
             tag_line=api_tag_line,
-            region=corrected_region
+            region=db_region
         )
     )
     
@@ -78,14 +77,14 @@ async def sync_riot_account_by_riot_id(game_name: str, tag_line: str, region: st
     return db_riot_account
 
 
-async def sync_tft_rank_for_account(riot_account: RiotAccount) -> RiotAccountLPHistory | None:
+async def sync_tft_rank_for_account(riot_account: RiotAccount,api_region: str) -> RiotAccountLPHistory | None:
     """
     Ruft die aktuellen Ranglistendaten für einen Riot Account ab und speichert sie in der History.
     """
     logger.info(f"Starting TFT rank sync for Riot account: {riot_account.game_name}")
 
     # 1. Ranglisten-Daten direkt mit der PUUID abrufen
-    league_entries = await api.get_tft_league_entry_by_puuid(riot_account.puuid, riot_account.region)
+    league_entries = await api.get_tft_league_entry_by_puuid(riot_account.puuid, api_region)
     if not league_entries:
         logger.warning(f"No ranked TFT league entries found for PUUID {riot_account.puuid}.")
         return None
@@ -158,9 +157,10 @@ async def handle_riot_account_registration(server_id: str, game_name: str, tag_l
     Gibt (RiotAccount, Status) zurück.
     """
     logger.info(f"Starting Riot account registration for {game_name}#{tag_line} on server {server_id}.")
-
+    api_region = 'euw1' if region == 'default' else region
     # --- Step 1: Get or Create the Riot Account ---
-    riot_account = await sync_riot_account_by_riot_id(game_name, tag_line, region)
+    riot_account = await sync_riot_account_by_riot_id(game_name, tag_line, api_region = api_region, db_region=region)
+
     if not riot_account:
         logger.error(f"Registration failed: Could not sync Riot account {game_name}#{tag_line}.")
         return None
@@ -182,7 +182,7 @@ async def handle_riot_account_registration(server_id: str, game_name: str, tag_l
     # --- Step 3: Return the result ---
     return riot_account, status
 
-async def get_synced_rank_for_account(game_name: str, tag_line: str) -> tuple[RiotAccount, RiotAccountLPHistory] | str:
+async def get_synced_rank_for_account(server_id :str, game_name: str, tag_line: str) -> tuple[RiotAccount, RiotAccountLPHistory] | str:
     """
     Sucht einen Riot Account in der DB, synchronisiert die neuesten LP-Daten
     und gibt den neuesten History-Eintrag zurück.
@@ -197,26 +197,43 @@ async def get_synced_rank_for_account(game_name: str, tag_line: str) -> tuple[Ri
 
     if not riot_account:
         return 'NOT_FOUND'
+    
+    api_region = 'euw1' if riot_account.region == 'default' else riot_account.region
 
     # Schritt 2: Rufe die existierende Kernlogik auf, um die neuesten Daten zu holen und zu speichern
-    live_lp_history = await sync_tft_rank_for_account(riot_account)
-    if live_lp_history:
-        # Fall A: Live-Sync war erfolgreich, gib die frischen Daten zurück
-        return riot_account, live_lp_history
-    else:
-        # Fall B: Live-Sync schlug fehl. Hole die letzten Daten aus der DB.
+    live_lp_history = await sync_tft_rank_for_account(riot_account,api_region)
+
+    lp_history_to_use = live_lp_history
+
+    if not lp_history_to_use:
+        # Live-Sync schlug fehl. Hole die letzten Daten aus der DB.
         logger.warning(f"Live-Sync für {riot_account.game_name} fehlgeschlagen. Versuche Fallback auf DB-Daten.")
-        fallback_lp_history = await loop.run_in_executor(
+        lp_history_to_use = await loop.run_in_executor(
             None,
             lambda: crud.get_latest_lp_history(riot_account.riot_account_id)
         )
-        
-        if fallback_lp_history:
-            # Erfolg: Gib den Account und die alten Daten zurück
-            return riot_account, fallback_lp_history
-        else:
-            # Kein Fallback möglich
-            return 'NO_HISTORY'
+
+    if not lp_history_to_use:
+        return 'NO_HISTORY'
+    
+    server_rank_info = await loop.run_in_executor(
+        None,
+        lambda: crud.get_server_rank_for_account(server_id, riot_account.riot_account_id)
+    )
+    
+    # Gib alle drei Informationen zurück
+    return riot_account, lp_history_to_use, server_rank_info
+
+async def get_server_leaderboard(server_id: str) -> list[tuple[RiotAccount, RiotAccountLPHistory]]:
+    """
+    High-level function to get the server leaderboard.
+    """
+    loop = asyncio.get_running_loop()
+    leaderboard_data = await loop.run_in_executor(
+        None,
+        lambda: crud.get_server_leaderboard(server_id)
+    )
+    return leaderboard_data    
     
 async def handle_periodic_rank_update():
     """
@@ -239,8 +256,10 @@ async def handle_periodic_rank_update():
     updated_count = 0
     for account in tracked_accounts:
         try:
+            api_region = 'euw1' if account.region == 'default' else account.region
+
             # Wir rufen die bereits existierende Funktion für einzelne Accounts auf
-            result = await sync_tft_rank_for_account(account)
+            result = await sync_tft_rank_for_account(account,api_region)
             if result:
                 updated_count += 1
             # Die proaktive Pause gehört hierher, um die API-Aufrufe zu verteilen
