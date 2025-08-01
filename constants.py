@@ -21,5 +21,6 @@ REGION_CORRECTIONS = {
     "lan": "la1",
     "tr": "tr1",
     "ru": "ru",
-    "me": "me1"
+    "me": "me1",
+    "eu1":"euw1"
 }

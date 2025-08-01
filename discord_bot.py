@@ -45,16 +45,16 @@ class MyBot(commands.Bot):
         
         # This syncs the slash commands to Discord.
         # You can specify a guild_id to make updates instant during testing.
-        GUILD_ID = discord.Object(id=os.getenv("DISCORD_GUILD_ID")) # Optional: Add your server ID to .env
-        self.tree.copy_global_to(guild=GUILD_ID)
-        await self.tree.sync(guild=GUILD_ID)
-        #await self.tree.sync() # Sync globally
+        #GUILD_ID = discord.Object(id=os.getenv("DISCORD_GUILD_ID")) # Optional: Add your server ID to .env
+        #self.tree.copy_global_to(guild=GUILD_ID)
+        #await self.tree.sync(guild=GUILD_ID)
+        await self.tree.sync() # Sync globally
 
-    async def on_ready(self):
-        """Event that runs when the bot is ready."""
-        logger.info(f'Bot logged in as {self.user.name} (ID:{self.user.id})')
-        logger.info('Bot is ready and online')
-        print("------")
+        async def on_ready(self):
+            """Event that runs when the bot is ready."""
+            logger.info(f'Bot logged in as {self.user.name} (ID:{self.user.id})')
+            logger.info('Bot is ready and online')
+            print("------")
 
 bot = MyBot()
 
