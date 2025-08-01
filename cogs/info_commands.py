@@ -95,10 +95,10 @@ class InfoCommands(commands.Cog):
         view.next_button.disabled = (view.current_page + 1) * view.items_per_page >= len(leaderboard_data)
 
         # Sende die öffentliche Nachricht
-        await interaction.channel.send(embed=initial_embed, delete_after=3600, view=view) # 3600s = 1h
+        await interaction.followup.send(embed=initial_embed, delete_after=360, view=view) # 3600s = 1h
 
         # Schritt 2: Schließe die ursprüngliche Interaktion mit einer kleinen privaten Nachricht ab.
-        await interaction.followup.send("Das Leaderboard wurde im Kanal gepostet.", ephemeral=True)
+        #await interaction.followup.send("Das Leaderboard wurde im Kanal gepostet.", ephemeral=True)
 
 async def setup(bot: commands.Bot):
     """Fügt den InfoCommands Cog zum Bot hinzu."""
