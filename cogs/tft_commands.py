@@ -63,47 +63,44 @@ class TFTCommands(commands.Cog):
         Registriert einen neuen Spieler und verknüpft ihn mit einem Riot Account.
         """
         logger.info(f"'{interaction.user.name}' versucht Riot Account '{game_name}#{tag_line}' in Region '{region}' zu registrieren.")
+        await interaction.response.defer(ephemeral=True)
 
         region_to_save = self._validate_and_correct_region(region)
-        display_region = "euw1 (Standard)" if region_to_save == 'default' else region_to_save
         
-        # Zuerst eine temporäre Antwort senden, da die API-Anfrage etwas dauern kann
-        await interaction.response.send_message(
-            f"Versuche, Riot Account **{game_name}#{tag_line}** ({region}) zu registrieren...",
-            ephemeral=True # Nur der Befehlsausführende sieht diese Nachricht
-        )
-
-        server_id = str(interaction.guild.id)
-
-        # Die Orchestrierungsfunktion aus data_manager aufrufen
         result = await data_manager.handle_riot_account_registration(
-            server_id=server_id,
+            server_id=str(interaction.guild.id),
             game_name=game_name,
             tag_line=tag_line,
             region=region_to_save
         )
 
+        # Wir definieren eine Standard-Nachricht für den Fehlerfall.
+        private_message = "Ein unerwarteter Fehler ist aufgetreten."
+
         if not result:
-            message = f"Fehler bei der Registrierung von **{game_name}#{tag_line}**. Überprüfe die Eingabe oder versuche es später erneut."
+            private_message = f"Fehler bei der Registrierung von **{game_name}#{tag_line}**. Überprüfe die Eingabe oder versuche es später erneut."
         else:
             riot_account, status = result
             account_name = f"**{riot_account.game_name}#{riot_account.tag_line}**"
             
             if status == 'ADDED':
-                #message = f"✅ Erfolg! Der Account {account_name} wird jetzt auf diesem Server getrackt."
+                # Bei Erfolg senden wir eine öffentliche Nachricht...
                 embed = discord.Embed(
-                title="We have a new competitor!",
-                description=f"{account_name} joined!",
-                color=discord.Color.green()
-            )
-                # Send without 'ephemeral=True' to make it visible to everyone
+                    title="We have a new competitor!",
+                    description=f"{account_name} joined!",
+                    color=discord.Color.green()
+                )
                 await interaction.channel.send(embed=embed)
-            elif status == 'ALREADY_EXISTS':
-                message = f"ℹ️ Der Account {account_name} wird bereits auf diesem Server getrackt."
-            else: # Sollte nicht passieren, aber als Fallback
-                message = "Ein unerwarteter Fehler ist aufgetreten."
+                # ...und setzen eine private Erfolgsnachricht, um die Interaktion abzuschließen.
+                private_message = "Registrierung erfolgreich!"
 
-        await interaction.followup.send(message, ephemeral=True)
+            elif status == 'ALREADY_EXISTS':
+                private_message = f"ℹ️ Der Account {account_name} wird bereits auf diesem Server getrackt."
+            
+            # Wenn der Status weder 'ADDED' noch 'ALREADY_EXISTS' ist, wird die Standard-Fehlermeldung verwendet.
+
+        # Am Ende wird immer eine private Follow-up-Nachricht gesendet, um die Interaktion abzuschließen.
+        await interaction.followup.send(private_message, ephemeral=True)
 
     @app_commands.command(name="rank", description="Zeigt den aktuellen Rang eines getrackten Spielers an.")
     @app_commands.check(is_in_allowed_channels)
